@@ -1,0 +1,255 @@
+C51 COMPILER V8.08   MAIN                                                                  09/09/2010 18:10:03 PAGE 1   
+
+
+C51 COMPILER V8.08, COMPILATION OF MODULE MAIN
+OBJECT MODULE PLACED IN main.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE main.c BROWSE DEBUG OBJECTEXTEND
+
+line level    source
+
+   1          /**************************************************************************************************
+   2                          Platform: Fire Bird V P89V51RD2
+   3                          Wireless Communication
+   4                          Written by: ERTS Lab,IITB Mumbai
+   5                          Last Modification: 2010
+   6                          Compiled with: uVision3 V3.90; C Compiler: C51.Exe, V8.18
+   7          **************************************************************************************************/
+   8          
+   9          #include <intrins.h>
+  10          #include "p89v51rx2.H"
+  11          
+  12          sbit buzzer = P2^7;                     //Buzzer pin
+  13          sbit LB=P1^0;                   //LEFT BACK Pin
+  14          sbit LF=P1^1;                           //LEFT FRONT Pin
+  15          sbit RF=P1^2;                           //RIGHT FRONT Pin
+  16          sbit RB=P3^4;                           //RIGHT BACK Pin
+  17          sbit left_velocity=P1^3;        //Left velocity control pin. 
+  18          sbit right_velocity=P1^4;       //Right velocity control pin.
+  19          
+  20          sbit start_conv = P3^6;          //P3^6 is connected to Start and ALE pin of ADC0808
+  21          sbit output_enable = P3^7;               //P3^7 is connected to Output Enable Pin of ADC0808
+  22          
+  23          unsigned char front_sharp_sensor = 0; //used in stop n go ACC
+  24          
+  25          
+  26          // function for giving a delay of ms milliseconds
+  27          void delay_ms(unsigned int ms)
+  28          {
+  29   1      unsigned int i,j;
+  30   1      
+  31   1      for(i=0;i<ms;i++)
+  32   1      for(j=0;j<53;j++);
+  33   1      }//end of delay_ms
+  34          
+  35          
+  36          unsigned char ADC_conversion(unsigned char ADC_ch_no)
+  37          {
+  38   1      unsigned char ADC_data;
+  39   1      
+  40   1      P0 = ADC_ch_no;           // to select channel no. send address on P0
+  41   1      
+  42   1      start_conv = 1; // ADC0808 will latch the address on L-H transition on the ALE pin
+  43   1      start_conv = 0; // ADC0808 will start conversion on H-L transition on the start pin
+  44   1      delay_ms(2);    // conversion time for ADC0808
+  45   1      
+  46   1      P0 =0xFF;               // output enable and read
+  47   1      output_enable = 1;      //Enabling o/p of ADC0808 for to read the converted data
+  48   1      ADC_data = P0;          //storing adc_data
+  49   1      output_enable = 0;      //disabling ADC 0808 o/p
+  50   1      return ADC_data;        //returning adc_data
+  51   1      }
+  52          
+  53          /**********************************************************************************
+  54          RF =  RIGHT MOTOR FORWARD
+  55          RB =  RIGHT MOTOR BACKWARD
+C51 COMPILER V8.08   MAIN                                                                  09/09/2010 18:10:03 PAGE 2   
+
+  56          LF =  LEFT MOTOR FORWARD
+  57          LB =  LEFT MOTOR BACKWARD
+  58          **********************************************************************************/
+  59          //direction control subroutines
+  60          void forward(void)
+  61          {
+  62   1      RF=1;
+  63   1      LF=1;
+  64   1      RB=0;
+  65   1      LB=0;
+  66   1      }//end of forward
+  67          
+  68          void backward(void)
+  69          {
+  70   1      RF=0;
+  71   1      LF=0;
+  72   1      RB=1;
+  73   1      LB=1;
+  74   1      }//end of backward
+  75          
+  76          
+  77          void left(void)
+  78          {
+  79   1      RF=1;
+  80   1      LF=0;
+  81   1      RB=0;
+  82   1      LB=0;
+  83   1      }//end of Left
+  84          
+  85          void right(void)  
+  86          {
+  87   1      RF=0;
+  88   1      LF=1;
+  89   1      RB=0;
+  90   1      LB=0;
+  91   1      }//end of Right
+  92          
+  93          void stop(void)
+  94          {
+  95   1      
+  96   1      RF=0;
+  97   1      LF=0;
+  98   1      RB=0;
+  99   1      LB=0;
+ 100   1      }//end of Stop
+ 101          
+ 102          /**************************************************************************
+ 103                  Function: uart_setup()
+ 104                          
+ 105                  Description: This function configures Timer1 for generating the Baudrate.
+ 106                                       The TH1 register should be written with following hex numbers
+ 107                                   for desired baud rate. After setting the baudrate, SCON register
+ 108                                       for enabling Rx and setting up the frame format.
+ 109                  
+ 110                                   9600 ----->  0xFD
+ 111                                       4800 ----->  0xFA
+ 112                                       2400 ----->  0xF4
+ 113                                       1200 ----->  0xE8
+ 114          
+ 115          **************************************************************************/
+ 116          void uart_setup()
+ 117          {
+C51 COMPILER V8.08   MAIN                                                                  09/09/2010 18:10:03 PAGE 3   
+
+ 118   1          TMOD = 0x20;                // configure timer1 for Mode 2 operation for the correct baud rate 
+ 119   1           TH1 = 0xFD;        // 9600 bps for 11.0592 MHz clock 
+ 120   1          TCON = 0x40;        // Start timer 1 by setting TR1 = 1 
+ 121   1          SCON = 0x50;                // Set Serial IO to receive and normal mode 
+ 122   1              
+ 123   1              RI=0;               //Receive Interrupt Flag is cleared
+ 124   1              TI=0;                           //Tx interrupt flag is cleared
+ 125   1      }//end of uart_setup
+ 126          
+ 127          
+ 128          /***************************************************************************
+ 129                  Function: void char RxData()
+ 130                  
+ 131                  Description: This function copies any data that is present in the SBUF 
+ 132                                       register and returns it to the calling function.
+ 133          ***************************************************************************/
+ 134          
+ 135           unsigned char RxData()
+ 136          {
+ 137   1          unsigned char rcv_data;                                                                                                                              
+ 138   1              rcv_data = SBUF;              //if any data is available copy it from SBUF
+ 139   1              return rcv_data;              //return the received data
+ 140   1      }//end of RxDAta
+ 141          
+ 142          
+ 143          
+ 144          
+ 145          
+ 146          //main function
+ 147          void main(void)
+ 148          {
+ 149   1       unsigned char rx_data;
+ 150   1        buzzer=1;
+ 151   1       left_velocity=1;  //setting this pin to one sets the motor to run at maximum velocity. 
+ 152   1                                         //Thus enable pin of Motor driver is always on unlike in PWM mode.
+ 153   1       right_velocity=1; //setting this pin to one sets the motor to run at maximum velocity.
+ 154   1                                         //Thus enable pin of Motor driver is always on unlike in PWM mode
+ 155   1       uart_setup();     // calling the UART setup function
+ 156   1      
+ 157   1       
+ 158   1       
+ 159   1       
+ 160   1       while(1)                                       //loop continuously
+ 161   1       {
+ 162   2        front_sharp_sensor = ADC_conversion(2);
+ 163   2      
+ 164   2        if (RI==1)                // if any data is present store it and transmit it back 
+ 165   2        {
+ 166   3         rx_data = RxData();      //get the received data     
+ 167   3            
+ 168   3         if(rx_data == 'F'){          //move robot fprward 
+ 169   4         forward(); 
+ 170   4         RI = 0;
+ 171   4         TI = 0;  
+ 172   4         }
+ 173   3         if(rx_data == 'B'){ //move robot backward
+ 174   4          backward();
+ 175   4              RI = 0;
+ 176   4              TI = 0;
+ 177   4         }
+ 178   3         if(rx_data == 'L'){  //move robot to left
+ 179   4          stop();
+C51 COMPILER V8.08   MAIN                                                                  09/09/2010 18:10:03 PAGE 4   
+
+ 180   4              left();
+ 181   4              delay_ms(500);
+ 182   4              stop();
+ 183   4              RI = 0;
+ 184   4              TI = 0;
+ 185   4         }
+ 186   3         if(rx_data == 'R'){  //move robot to right
+ 187   4          stop();
+ 188   4              right();
+ 189   4              delay_ms(500);
+ 190   4              stop();
+ 191   4              RI = 0;
+ 192   4              TI = 0;
+ 193   4         }
+ 194   3         if(rx_data == 'S'){  //move robot to right
+ 195   4          stop();
+ 196   4              RI = 0;
+ 197   4              TI = 0;
+ 198   4         }                                                             
+ 199   3      
+ 200   3         if(rx_data == 'O'){  //switchon buzzer 
+ 201   4          buzzer=0;
+ 202   4              RI = 0;
+ 203   4              TI = 0;
+ 204   4         }
+ 205   3         if(rx_data == 'N'){  //switch off buzzer
+ 206   4          buzzer=1;
+ 207   4              RI = 0;
+ 208   4              TI = 0;
+ 209   4         }    
+ 210   3          RI = 0;
+ 211   3              TI = 0;                  //Clear receive interrupt. Must be cleared by the user.  
+ 212   3        }
+ 213   2        
+ 214   2        if(front_sharp_sensor >= 110) // obstacle is near the robot, stop and turn on the buzzer
+ 215   2              {
+ 216   3                 stop(); 
+ 217   3                 backward();
+ 218   3                 left();
+ 219   3                 delay_ms(500);
+ 220   3                 stop();
+ 221   3                         //buzzer=0; 
+ 222   3              }
+ 223   2        
+ 224   2       }
+ 225   1      }//end of main                                   
+ 226          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    254    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =      1    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
